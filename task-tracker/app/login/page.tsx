@@ -1,0 +1,56 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || 'Login failed');
+      }
+      localStorage.setItem('token', json.data.token);
+      router.push('/');
+    } catch (err: any) {
+      setError(err.message || 'Login failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-zinc-50 p-6">
+      <form onSubmit={handleSubmit} className="w-full max-w-md bg-white border border-zinc-200 rounded-lg p-6 space-y-4">
+        <h1 className="text-2xl text-black font-semibold">Log in</h1>
+        {error && <div className="text-red-600 text-sm">{error}</div>}
+        <div className="space-y-1">
+          <label className="text-sm  text-black">Email</label>
+          <input type="email" className="w-full border border-zinc-300  text-black rounded px-3 py-2" value={email} onChange={(e) => setEmail(e.target.value)} required />
+        </div>
+        <div className="space-y-1">
+          <label className="text-sm text-black">Password</label>
+          <input type="password" className="w-full text-black border border-zinc-300 rounded px-3 py-2" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </div>
+        <button disabled={loading} className="w-full bg-black text-white rounded py-2 disabled:opacity-60">{loading ? 'Signing in...' : 'Log in'}</button>
+        <p className="text-sm text-zinc-600">No account? <a className="underline" href="/signup">Create one</a></p>
+      </form>
+    </div>
+  );
+}
+
+
