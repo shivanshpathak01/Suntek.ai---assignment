@@ -53,3 +53,26 @@ Live demo: <add link>
 Test credentials (optional):
 - email: demo@example.com
 - password: demodemo
+
+### Optional: Supabase RLS (Read before enabling)
+
+This app uses custom JWT in the app layer for auth. If you enable Supabase RLS, you must also use Supabase Auth (so `auth.uid()` works in policies) or create permissive policies that still limit access appropriately.
+
+If you migrate to Supabase Auth, enable RLS and add policies like:
+```
+alter table users enable row level security;
+alter table tasks enable row level security;
+alter table time_logs enable row level security;
+
+create policy "users_self" on users
+  for select using (auth.uid() = id)
+  with check (auth.uid() = id);
+
+create policy "tasks_by_owner" on tasks
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "time_logs_by_owner" on time_logs
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+```
+
+If you keep custom JWT (current setup), keep RLS disabled or write proxy policies and a service role flow. Otherwise queries will fail.

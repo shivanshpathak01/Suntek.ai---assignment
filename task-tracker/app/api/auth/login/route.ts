@@ -2,18 +2,21 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { comparePassword, generateToken } from '@/lib/auth';
 import { ApiResponse, AuthResponse, LoginInput, UserWithPassword } from '@/lib/types';
+import { loginSchema, formatZodError } from '@/lib/validation';
 
 export async function POST(req: NextRequest) {
   try {
-    const body: LoginInput = await req.json();
-    const { email, password } = body;
-
-    if (!email || !password) {
+    const json = await req.json();
+    const parsed = loginSchema.safeParse(json);
+    if (!parsed.success) {
       return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Email and password are required' },
+        { success: false, error: formatZodError(parsed.error) },
         { status: 400 }
       );
     }
+    const { email, password } = parsed.data as LoginInput;
+
+    // zod validated inputs
 
     const { data: user, error } = await supabase
       .from('users')
@@ -58,5 +61,6 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+
 
 

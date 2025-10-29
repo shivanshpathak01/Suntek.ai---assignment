@@ -2,29 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { hashPassword, generateToken } from '@/lib/auth';
 import { SignupInput, ApiResponse, AuthResponse } from '@/lib/types';
+import { signupSchema, formatZodError } from '@/lib/validation';
 
 export async function POST(req: NextRequest) {
   try {
-    const body: SignupInput = await req.json();
-    const { email, password, name } = body;
+    const json = await req.json();
+    const parsed = signupSchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json<ApiResponse>({ success: false, error: formatZodError(parsed.error) }, { status: 400 });
+    }
+    const { email, password, name } = parsed.data as SignupInput;
 
     // Validation
-    if (!email || !password || !name) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Email, password, and name are required' },
-        { status: 400 }
-      );
-    }
-
-    if (password.length < 6) {
-      return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Password must be at least 6 characters' },
-        { status: 400 }
-      );
-    }
+    // zod already validates required and min length
 
     // Check if user already exists
-    const { data: existingUser } = await supabase
+    const { data: existingUser, error: existingErr } = await supabase
       .from('users')
       .select('id')
       .eq('email', email)
@@ -52,9 +45,11 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (error || !newUser) {
-      console.error('Error creating user:', error);
+      try {
+        console.error('Error creating user:', error);
+      } catch {}
       return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Failed to create user' },
+        { success: false, error: error?.message || 'Failed to create user' },
         { status: 500 }
       );
     }

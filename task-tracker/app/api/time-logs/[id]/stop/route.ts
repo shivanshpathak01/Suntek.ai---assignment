@@ -2,12 +2,14 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { withAuth, AuthenticatedRequest } from '@/lib/middleware';
 import { ApiResponse, TimeLog } from '@/lib/types';
+import { stopTimeLogSchema } from '@/lib/validation';
 
 export const POST = withAuth(async (req: AuthenticatedRequest) => {
   try {
     const id = req.nextUrl.pathname.split('/').slice(-2, -1)[0];
-    const body = await req.json().catch(() => ({}));
-    const end_time: string | undefined = body?.end_time;
+    const json = await req.json().catch(() => ({}));
+    const parsed = stopTimeLogSchema.safeParse(json);
+    const end_time: string | undefined = parsed.success ? parsed.data.end_time : undefined;
 
     if (!id) return NextResponse.json<ApiResponse>({ success: false, error: 'Time log ID required' }, { status: 400 });
 
@@ -40,5 +42,6 @@ export const POST = withAuth(async (req: AuthenticatedRequest) => {
     return NextResponse.json<ApiResponse>({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 });
+
 
 

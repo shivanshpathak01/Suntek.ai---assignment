@@ -2,12 +2,17 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { withAuth, AuthenticatedRequest } from '@/lib/middleware';
 import { ApiResponse, CreateTimeLogInput, TimeLog } from '@/lib/types';
+import { createTimeLogSchema } from '@/lib/validation';
 
 // Start a time log
 export const POST = withAuth(async (req: AuthenticatedRequest) => {
   try {
-    const body: CreateTimeLogInput = await req.json();
-    const { task_id, start_time } = body;
+    const json = await req.json();
+    const parsed = createTimeLogSchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json<ApiResponse>({ success: false, error: 'Invalid time log data' }, { status: 400 });
+    }
+    const { task_id, start_time } = parsed.data as CreateTimeLogInput;
     if (!task_id || !start_time) {
       return NextResponse.json<ApiResponse>({ success: false, error: 'task_id and start_time are required' }, { status: 400 });
     }
@@ -60,5 +65,6 @@ export const GET = withAuth(async (req: AuthenticatedRequest) => {
     return NextResponse.json<ApiResponse>({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 });
+
 
 

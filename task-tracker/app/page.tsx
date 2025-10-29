@@ -29,6 +29,9 @@ export default function Dashboard() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [status, setStatus] = useState<'Pending' | 'In Progress' | 'Completed'>('Pending');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [timeLogs, setTimeLogs] = useState<TimeLog[]>([]);
+  const [nowTs, setNowTs] = useState<number>(Date.now());
   const [activeLogByTask, setActiveLogByTask] = useState<Record<string, TimeLog | undefined>>({});
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<{ total_time_seconds: number; date: string; completed_tasks?: any[]; in_progress_tasks?: any[]; pending_tasks?: any[] } | null>(null);
@@ -64,12 +67,14 @@ export default function Dashboard() {
       return;
     }
     setTasks(json.data);
-    // load active logs
+    // load time logs
     const timeRes = await authedFetch('/api/time-logs');
     const timeJson = await timeRes.json();
     if (timeRes.ok && timeJson.success) {
+      const logs = timeJson.data as TimeLog[];
+      setTimeLogs(logs);
       const active: Record<string, TimeLog> = {};
-      for (const log of timeJson.data as TimeLog[]) {
+      for (const log of logs) {
         if (!log.end_time) active[log.task_id] = log;
       }
       setActiveLogByTask(active);
@@ -87,14 +92,13 @@ export default function Dashboard() {
     try {
       let taskTitle = title.trim();
       let taskDesc = description.trim();
-      if (!taskTitle && newTaskInput.trim()) {
-        // naive transform if AI not used here
-        taskTitle = newTaskInput.trim().replace(/^\w/, (c) => c.toUpperCase());
-        taskDesc = `Task: ${newTaskInput.trim()}`;
+      const body: any = { title: taskTitle, description: taskDesc, status };
+      if (newTaskInput.trim() && !taskTitle) {
+        body.userInput = newTaskInput.trim();
       }
       const res = await authedFetch('/api/tasks', {
         method: 'POST',
-        body: JSON.stringify({ title: taskTitle, description: taskDesc, status }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
       if (!res.ok || !json.success) throw new Error(json.error || 'Failed to create');
@@ -102,6 +106,7 @@ export default function Dashboard() {
       setDescription('');
       setNewTaskInput('');
       await fetchTasks();
+      await fetchSummary();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -109,36 +114,108 @@ export default function Dashboard() {
     }
   }
 
+  async function suggestWithAI() {
+    try {
+      setAiLoading(true);
+      setError(null);
+      const res = await authedFetch('/api/ai/suggest-task', {
+        method: 'POST',
+        body: JSON.stringify({ userInput: newTaskInput }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) throw new Error(json.error || 'AI suggestion failed');
+      setTitle(json.data.title || '');
+      setDescription(json.data.description || '');
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   async function updateTask(id: string, updates: Partial<Task>) {
+    // If marking as Completed and timer running, stop it first so duration is captured
+    if (updates.status === 'Completed' && activeLogByTask[id]) {
+      await stopTimer(id);
+    }
     const res = await authedFetch(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(updates) });
     const json = await res.json();
-    if (res.ok && json.success) await fetchTasks();
+    if (res.ok && json.success) {
+      await fetchTasks();
+      await fetchSummary();
+    }
   }
 
   async function deleteTask(id: string) {
     const res = await authedFetch(`/api/tasks/${id}`, { method: 'DELETE' });
     const json = await res.json();
-    if (res.ok && json.success) await fetchTasks();
+    if (res.ok && json.success) {
+      // optimistic removal
+      setActiveLogByTask((p) => {
+        const { [id]: _, ...rest } = p as any;
+        return rest;
+      });
+      setTimeLogs((logs) => logs.filter((l) => l.task_id !== id));
+      await fetchTasks();
+      await fetchSummary();
+    }
   }
 
   async function startTimer(taskId: string) {
+    const optimisticLog: TimeLog = {
+      id: `tmp-${taskId}-${Date.now()}`,
+      task_id: taskId,
+      start_time: new Date().toISOString(),
+      end_time: null,
+      duration_seconds: null,
+    };
+    setActiveLogByTask((p) => ({ ...p, [taskId]: optimisticLog }));
+    setTimeLogs((p) => [optimisticLog, ...p]);
     const res = await authedFetch('/api/time-logs', {
       method: 'POST',
-      body: JSON.stringify({ task_id: taskId, start_time: new Date().toISOString() }),
+      body: JSON.stringify({ task_id: taskId, start_time: optimisticLog.start_time }),
     });
     const json = await res.json();
-    if (res.ok && json.success) await fetchTasks();
+    if (res.ok && json.success) {
+      setTimeLogs((logs) => {
+        const filtered = logs.filter((l) => l.id !== optimisticLog.id);
+        return [json.data as TimeLog, ...filtered];
+      });
+      setActiveLogByTask((p) => ({ ...p, [taskId]: json.data as TimeLog }));
+      await fetchTasks();
+      await fetchSummary();
+    } else {
+      setTimeLogs((logs) => logs.filter((l) => l.id !== optimisticLog.id));
+      setActiveLogByTask((p) => {
+        const { [taskId]: _, ...rest } = p;
+        return rest;
+      });
+    }
   }
 
   async function stopTimer(taskId: string) {
     const log = activeLogByTask[taskId];
     if (!log) return;
+    const endIso = new Date().toISOString();
+    // optimistic close
+    setActiveLogByTask((p) => {
+      const { [taskId]: _, ...rest } = p;
+      return rest;
+    });
+    setTimeLogs((logs) => logs.map((l) => (l.id === log.id ? { ...l, end_time: endIso, duration_seconds: Math.max(0, Math.floor((new Date(endIso).getTime() - new Date(l.start_time).getTime()) / 1000)) } : l)));
     const res = await authedFetch(`/api/time-logs/${log.id}/stop`, {
       method: 'POST',
-      body: JSON.stringify({ end_time: new Date().toISOString() }),
+      body: JSON.stringify({ end_time: endIso }),
     });
     const json = await res.json();
-    if (res.ok && json.success) await fetchTasks();
+    if (res.ok && json.success) {
+      setTimeLogs((logs) => logs.map((l) => (l.id === log.id ? (json.data as TimeLog) : l)));
+      await fetchTasks();
+      await fetchSummary();
+    } else {
+      await fetchTasks();
+      await fetchSummary();
+    }
   }
 
   function logout() {
@@ -148,12 +225,42 @@ export default function Dashboard() {
   }
 
   const totalsByTask = useMemo(() => {
-    return {} as Record<string, number>;
-  }, [tasks]);
+    const totals: Record<string, number> = {};
+    for (const log of timeLogs) {
+      const base = totals[log.task_id] || 0;
+      const end = log.end_time ? new Date(log.end_time).getTime() : nowTs;
+      const start = new Date(log.start_time).getTime();
+      totals[log.task_id] = base + Math.max(0, Math.floor((end - start) / 1000));
+    }
+    return totals;
+  }, [timeLogs, nowTs]);
+
+  const activeCount = useMemo(() => Object.keys(activeLogByTask).length, [activeLogByTask]);
+
+  useEffect(() => {
+    if (activeCount === 0) return;
+    const id = setInterval(() => setNowTs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [activeCount]);
+
+  const clientTodaySeconds = useMemo(() => {
+    const today = new Date();
+    const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
+    let total = 0;
+    for (const log of timeLogs) {
+      const s = new Date(log.start_time).getTime();
+      if (s >= startOfDay && s < endOfDay) {
+        const e = log.end_time ? new Date(log.end_time).getTime() : nowTs;
+        total += Math.max(0, Math.floor((e - s) / 1000));
+      }
+    }
+    return total;
+  }, [timeLogs, nowTs]);
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center text-black">
         <div className="text-center space-y-4">
           <h1 className="text-2xl font-semibold">Task & Time Tracker</h1>
           <div className="space-x-3">
@@ -166,13 +273,13 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-screen bg-zinc-50 text-black">
       <header className="flex items-center justify-between max-w-4xl mx-auto p-4">
         <h1 className="text-xl font-semibold">Task & Time Tracker</h1>
         <div className="flex items-center gap-4 text-sm">
-          {summary && (
-            <span>Today: {format(new Date(), 'yyyy-MM-dd')} • {Math.floor((summary.total_time_seconds || 0)/3600)}h {Math.floor(((summary.total_time_seconds || 0)%3600)/60)}m</span>
-          )}
+          <span>
+            Today: {format(new Date(), 'yyyy-MM-dd')} • {Math.floor((clientTodaySeconds)/3600)}h {Math.floor(((clientTodaySeconds)%3600)/60)}m
+          </span>
           <button onClick={logout} className="px-3 py-1 border rounded">Log out</button>
         </div>
       </header>
@@ -182,7 +289,10 @@ export default function Dashboard() {
         <section className="bg-white border rounded p-4">
           <h2 className="font-medium mb-3">Add Task</h2>
           <div className="grid gap-2 sm:grid-cols-2">
-            <input placeholder="Natural language: e.g., follow up with designer" className="border rounded px-3 py-2" value={newTaskInput} onChange={(e) => setNewTaskInput(e.target.value)} />
+            <div className="flex gap-2">
+              <input placeholder="Natural language: e.g., follow up with designer" className="border rounded px-3 py-2 flex-1" value={newTaskInput} onChange={(e) => setNewTaskInput(e.target.value)} />
+              <button type="button" onClick={suggestWithAI} disabled={!newTaskInput.trim() || aiLoading} className="px-3 py-2 border rounded whitespace-nowrap">{aiLoading ? 'Thinking…' : 'Suggest'}</button>
+            </div>
             <input placeholder="Title (optional)" className="border rounded px-3 py-2" value={title} onChange={(e) => setTitle(e.target.value)} />
             <input placeholder="Description (optional)" className="border rounded px-3 py-2 sm:col-span-2" value={description} onChange={(e) => setDescription(e.target.value)} />
             <div className="flex items-center gap-2">
@@ -208,6 +318,7 @@ export default function Dashboard() {
                     <div className="font-medium">{task.title}</div>
                     {task.description && <div className="text-sm text-zinc-600">{task.description}</div>}
                     <div className="text-xs text-zinc-500 mt-1">Status: {task.status}</div>
+                    <div className="text-xs text-zinc-500">Tracked: {Math.floor((totalsByTask[task.id] || 0)/3600)}h {Math.floor(((totalsByTask[task.id] || 0)%3600)/60)}m</div>
                   </div>
                   <div className="flex items-center gap-2 mt-2 sm:mt-0">
                     <select value={task.status} onChange={(e) => updateTask(task.id, { status: e.target.value as Task['status'] })} className="border rounded px-2 py-1 text-sm">

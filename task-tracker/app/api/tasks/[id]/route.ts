@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { supabase } from '@/lib/supabase';
 import { withAuth, AuthenticatedRequest } from '@/lib/middleware';
 import { ApiResponse, Task, UpdateTaskInput } from '@/lib/types';
+import { updateTaskSchema, formatZodError } from '@/lib/validation';
 
 // Get single task
 export const GET = withAuth(async (req: AuthenticatedRequest) => {
@@ -32,7 +33,12 @@ export const PATCH = withAuth(async (req: AuthenticatedRequest) => {
     const id = req.nextUrl.pathname.split('/').pop();
     if (!id) return NextResponse.json<ApiResponse>({ success: false, error: 'Task ID required' }, { status: 400 });
 
-    const body: UpdateTaskInput = await req.json();
+    const json = await req.json();
+    const parsed = updateTaskSchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json<ApiResponse>({ success: false, error: formatZodError(parsed.error) }, { status: 400 });
+    }
+    const body: UpdateTaskInput = parsed.data;
 
     const { data, error } = await supabase
       .from('tasks')
@@ -71,5 +77,6 @@ export const DELETE = withAuth(async (req: AuthenticatedRequest) => {
     return NextResponse.json<ApiResponse>({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 });
+
 
 

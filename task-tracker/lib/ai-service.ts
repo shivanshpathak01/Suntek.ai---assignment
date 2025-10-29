@@ -1,14 +1,11 @@
 import OpenAI from 'openai';
 import { AITaskSuggestion } from './types';
 
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null;
+const apiKey = process.env.OPENAI_API_KEY;
+const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+const openai = apiKey ? new OpenAI({ apiKey }) : null;
 
-export async function generateTaskSuggestion(
-  userInput: string
-): Promise<AITaskSuggestion> {
-  // If OpenAI is not configured, return a simple formatted version
+export async function generateTaskSuggestion(userInput: string): Promise<AITaskSuggestion> {
   if (!openai) {
     return {
       title: userInput.charAt(0).toUpperCase() + userInput.slice(1),
@@ -18,46 +15,46 @@ export async function generateTaskSuggestion(
 
   try {
     const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+      model,
+      temperature: 0.4,
+      max_tokens: 200,
       messages: [
         {
           role: 'system',
-          content: `You are a helpful assistant that converts casual task descriptions into clear, actionable task titles and descriptions. 
-          Return a JSON object with "title" and "description" fields.
-          The title should be concise and clear (max 100 characters).
-          The description should be more detailed and actionable (max 500 characters).`,
+          content:
+            'You convert casual task text into a concise title and a short, actionable description. Respond ONLY with strict JSON: {"title": string, "description": string}. No extra text.',
         },
         {
           role: 'user',
-          content: `Convert this task: "${userInput}"`,
+          content: userInput,
         },
       ],
-      temperature: 0.7,
-      max_tokens: 200,
     });
 
-    const content = completion.choices[0]?.message?.content;
-    if (!content) {
-      throw new Error('No response from AI');
-    }
+    const content = completion.choices?.[0]?.message?.content?.trim();
+    if (!content) throw new Error('No content from OpenAI');
 
-    // Try to parse JSON response
+    // Extract JSON if wrapped in code fences
+    const fenceMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const jsonText = fenceMatch ? fenceMatch[1] : content;
+
+    let parsed: any;
     try {
-      const parsed = JSON.parse(content);
-      return {
-        title: parsed.title || userInput,
-        description: parsed.description || '',
-      };
-    } catch {
-      // If not JSON, use the content as description
+      parsed = JSON.parse(jsonText);
+    } catch (err) {
+      // As a last resort, create a reasonable fallback using model output
       return {
         title: userInput.charAt(0).toUpperCase() + userInput.slice(1),
         description: content,
       };
     }
+
+    return {
+      title: typeof parsed?.title === 'string' && parsed.title.trim() ? parsed.title.trim() : userInput,
+      description: typeof parsed?.description === 'string' ? parsed.description.trim() : `Task: ${userInput}`,
+    };
   } catch (error) {
     console.error('AI task generation error:', error);
-    // Fallback to simple formatting
     return {
       title: userInput.charAt(0).toUpperCase() + userInput.slice(1),
       description: `Task: ${userInput}`,
