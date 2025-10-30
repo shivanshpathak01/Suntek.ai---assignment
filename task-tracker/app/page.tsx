@@ -337,7 +337,7 @@ export default function Dashboard() {
 
   if (!token) {
     return (
-      <div className="min-h-screen flex items-center justify-center text-black">
+      <div className="min-h-screen flex items-center justify-center bg-zinc-50 text-black">
         <div className="text-center space-y-4">
           <h1 className="text-2xl font-semibold">Task & Time Tracker</h1>
           <div className="space-x-3">
@@ -352,12 +352,12 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-zinc-50 text-black">
       <header className="flex items-center justify-between max-w-4xl mx-auto p-4">
-        <h1 className="text-xl font-semibold">Task & Time Tracker</h1>
+        <h1 className="text-5xl font-bold">Task & Time Tracker</h1>
         <div className="flex items-center gap-4 text-sm">
           <span>
             Today: {format(new Date(), 'yyyy-MM-dd')} • {Math.floor((clientTodaySeconds) / 3600)}h {Math.floor(((clientTodaySeconds) % 3600) / 60)}m
           </span>
-          <button onClick={logout} className="px-3 py-1 border rounded">Log out</button>
+          <button onClick={logout} className="px-3 py-1 border bg-red-300 rounded">Log out</button>
         </div>
       </header>
       <main className="max-w-4xl mx-auto p-4 grid gap-6">
@@ -420,7 +420,7 @@ export default function Dashboard() {
         {summary && (
           <section className="bg-white border rounded p-4">
             <h2 className="font-medium mb-3">Today's Summary</h2>
-            <div className="text-sm text-zinc-700 mb-2">Total Tracked: {Math.floor((summary.total_time_seconds || 0) / 3600)}h {Math.floor(((summary.total_time_seconds || 0) % 3600) / 60)}m</div>
+            <div className="text-sm text-zinc-700 mb-2">Total Tracked: {Math.floor(clientTodaySeconds / 3600)}h {Math.floor((clientTodaySeconds % 3600) / 60)}m</div>
             <div className="grid sm:grid-cols-3 gap-3 text-sm">
               <div>
                 <div className="font-medium mb-1">Completed</div>
