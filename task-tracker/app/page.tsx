@@ -134,15 +134,24 @@ export default function Dashboard() {
   }
 
   async function updateTask(id: string, updates: Partial<Task>) {
-    // If marking as Completed and timer running, stop it first so duration is captured
-    if (updates.status === 'Completed' && activeLogByTask[id]) {
-      await stopTimer(id);
-    }
-    const res = await authedFetch(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(updates) });
-    const json = await res.json();
-    if (res.ok && json.success) {
-      await fetchTasks();
-      await fetchSummary();
+    try {
+      // If marking as Completed and timer running, stop it first so duration is captured
+      if (updates.status === 'Completed' && activeLogByTask[id]) {
+        await stopTimer(id);
+        // Wait a bit to ensure the timer stop is processed
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      const res = await authedFetch(`/api/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(updates) });
+      const json = await res.json();
+      if (res.ok && json.success) {
+        await fetchTasks();
+        await fetchSummary();
+      } else {
+        setError(json.error || 'Failed to update task');
+      }
+    } catch (e: any) {
+      setError(e.message);
     }
   }
 
@@ -226,16 +235,53 @@ export default function Dashboard() {
 
   const totalsByTask = useMemo(() => {
     const totals: Record<string, number> = {};
-    for (const log of timeLogs) {
-      const base = totals[log.task_id] || 0;
-      const end = log.end_time ? new Date(log.end_time).getTime() : nowTs;
-      const start = new Date(log.start_time).getTime();
-      totals[log.task_id] = base + Math.max(0, Math.floor((end - start) / 1000));
+
+    // If no time logs, return empty totals
+    if (!timeLogs || timeLogs.length === 0) {
+      return totals;
     }
+
+    for (const log of timeLogs) {
+      if (!log || !log.task_id) continue;
+
+      const base = totals[log.task_id] || 0;
+      let duration = 0;
+
+      try {
+        if (log.duration_seconds !== null && log.duration_seconds !== undefined && log.end_time) {
+          // Use stored duration for completed logs
+          duration = log.duration_seconds;
+        } else if (!log.end_time && log.start_time) {
+          // Calculate live duration for active logs
+          const start = new Date(log.start_time).getTime();
+          if (!isNaN(start) && nowTs > start) {
+            duration = Math.max(0, Math.floor((nowTs - start) / 1000));
+          }
+        } else if (log.end_time && log.start_time) {
+          // Fallback calculation for logs with end_time but no duration_seconds
+          const start = new Date(log.start_time).getTime();
+          const end = new Date(log.end_time).getTime();
+          if (!isNaN(start) && !isNaN(end) && end > start) {
+            duration = Math.max(0, Math.floor((end - start) / 1000));
+          }
+        }
+      } catch (error) {
+        console.error('Error calculating duration for log:', log, error);
+        duration = 0;
+      }
+
+      totals[log.task_id] = base + duration;
+    }
+
     return totals;
   }, [timeLogs, nowTs]);
 
   const activeCount = useMemo(() => Object.keys(activeLogByTask).length, [activeLogByTask]);
+
+  // Initialize nowTs properly and update it when there are active timers
+  useEffect(() => {
+    setNowTs(Date.now()); // Ensure initial value is set
+  }, []);
 
   useEffect(() => {
     if (activeCount === 0) return;
@@ -243,16 +289,47 @@ export default function Dashboard() {
     return () => clearInterval(id);
   }, [activeCount]);
 
+  // Also update nowTs when timeLogs change to ensure calculations are current
+  useEffect(() => {
+    setNowTs(Date.now());
+  }, [timeLogs]);
+
   const clientTodaySeconds = useMemo(() => {
+    if (!timeLogs || timeLogs.length === 0) return 0;
+
     const today = new Date();
     const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
     const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
     let total = 0;
+
     for (const log of timeLogs) {
-      const s = new Date(log.start_time).getTime();
-      if (s >= startOfDay && s < endOfDay) {
-        const e = log.end_time ? new Date(log.end_time).getTime() : nowTs;
-        total += Math.max(0, Math.floor((e - s) / 1000));
+      if (!log || !log.start_time) continue;
+
+      try {
+        const startTime = new Date(log.start_time).getTime();
+        if (isNaN(startTime) || startTime < startOfDay || startTime >= endOfDay) continue;
+
+        let duration = 0;
+
+        if (log.duration_seconds !== null && log.duration_seconds !== undefined && log.end_time) {
+          // Use stored duration for completed logs
+          duration = log.duration_seconds;
+        } else if (!log.end_time) {
+          // Calculate live duration for active logs
+          if (nowTs > startTime) {
+            duration = Math.max(0, Math.floor((nowTs - startTime) / 1000));
+          }
+        } else if (log.end_time) {
+          // Fallback calculation
+          const endTime = new Date(log.end_time).getTime();
+          if (!isNaN(endTime) && endTime > startTime) {
+            duration = Math.max(0, Math.floor((endTime - startTime) / 1000));
+          }
+        }
+
+        total += duration;
+      } catch (error) {
+        console.error('Error calculating today duration for log:', log, error);
       }
     }
     return total;
@@ -278,7 +355,7 @@ export default function Dashboard() {
         <h1 className="text-xl font-semibold">Task & Time Tracker</h1>
         <div className="flex items-center gap-4 text-sm">
           <span>
-            Today: {format(new Date(), 'yyyy-MM-dd')} • {Math.floor((clientTodaySeconds)/3600)}h {Math.floor(((clientTodaySeconds)%3600)/60)}m
+            Today: {format(new Date(), 'yyyy-MM-dd')} • {Math.floor((clientTodaySeconds) / 3600)}h {Math.floor(((clientTodaySeconds) % 3600) / 60)}m
           </span>
           <button onClick={logout} className="px-3 py-1 border rounded">Log out</button>
         </div>
@@ -318,7 +395,7 @@ export default function Dashboard() {
                     <div className="font-medium">{task.title}</div>
                     {task.description && <div className="text-sm text-zinc-600">{task.description}</div>}
                     <div className="text-xs text-zinc-500 mt-1">Status: {task.status}</div>
-                    <div className="text-xs text-zinc-500">Tracked: {Math.floor((totalsByTask[task.id] || 0)/3600)}h {Math.floor(((totalsByTask[task.id] || 0)%3600)/60)}m</div>
+                    <div className="text-xs text-zinc-500">Tracked: {Math.floor((totalsByTask[task.id] || 0) / 3600)}h {Math.floor(((totalsByTask[task.id] || 0) % 3600) / 60)}m</div>
                   </div>
                   <div className="flex items-center gap-2 mt-2 sm:mt-0">
                     <select value={task.status} onChange={(e) => updateTask(task.id, { status: e.target.value as Task['status'] })} className="border rounded px-2 py-1 text-sm">
@@ -343,7 +420,7 @@ export default function Dashboard() {
         {summary && (
           <section className="bg-white border rounded p-4">
             <h2 className="font-medium mb-3">Today's Summary</h2>
-            <div className="text-sm text-zinc-700 mb-2">Total Tracked: {Math.floor((summary.total_time_seconds || 0)/3600)}h {Math.floor(((summary.total_time_seconds || 0)%3600)/60)}m</div>
+            <div className="text-sm text-zinc-700 mb-2">Total Tracked: {Math.floor((summary.total_time_seconds || 0) / 3600)}h {Math.floor(((summary.total_time_seconds || 0) % 3600) / 60)}m</div>
             <div className="grid sm:grid-cols-3 gap-3 text-sm">
               <div>
                 <div className="font-medium mb-1">Completed</div>
