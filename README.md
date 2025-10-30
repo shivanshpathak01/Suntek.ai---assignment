@@ -139,25 +139,18 @@ Ensure environment variables are configured and the database schema is applied t
 
 ## 🌐 Live Demo
 
-**Live Application**: [Add your deployed link here]
+**Live Application**: [https://suntek-ai-assignment-tan.vercel.app/]
 
 ### Test Credentials (Optional)
 ```
-Email: demo@example.com
-Password: demodemo
+Email: sam@gmail.com
+Password: Sam@1234
 ```
 
 ## 📸 Screenshots
 
-*Add screenshots of your application here showing:*
-- Dashboard with tasks and timers
-- Real-time timer functionality
-- Daily summary section
-- Task creation with AI suggestions
-
-## 🎥 Demo Video
-
-*Add link to demo video showcasing the real-time timer functionality*
+<img width="1309" height="905" alt="image" src="https://github.com/user-attachments/assets/000dfb2f-7031-40fb-b679-c5d9ad7053e3" />
+<img width="1476" height="910" alt="image" src="https://github.com/user-attachments/assets/385fb9c2-5271-40ea-829d-3461b23867fd" />
 
 ## 🔧 Recent Improvements
 
@@ -214,7 +207,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 📞 Support
 
-For support, email [your-email] or create an issue in the repository.
+For support, email [shivanshpathak0001@gmail.com] or create an issue in the repository.
 
 ---
 
